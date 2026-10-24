@@ -9,7 +9,7 @@ import {
   View,
 } from 'react-native';
 import { addTransaction, getBudgetStatus, getCategories, getWallets } from '../db';
-import { getMonthKey, getPercent } from '../utils';
+import { formatDate, formatMonth, getMonthKey, getPercent, parseInputDate } from '../utils';
 
 import { colors, fonts } from '../theme';
 
@@ -17,6 +17,7 @@ export default function AddTransactionPage({ navigation }) {
   const [type, setType] = useState('chi');
   const [amount, setAmount] = useState('');
   const [note, setNote] = useState('');
+  const [dateText, setDateText] = useState(formatDate(new Date().toISOString()));
 
   const [categories, setCategories] = useState([]);
   const [wallets, setWallets] = useState([]);
@@ -63,6 +64,22 @@ export default function AddTransactionPage({ navigation }) {
       return;
     }
 
+    // Ngày phát sinh: nhập dd/mm/yyyy, không được ở tương lai
+    const picked = parseInputDate(dateText);
+
+    if (picked === null) {
+      setErrorMessage('Ngày không hợp lệ, hãy nhập dạng dd/mm/yyyy');
+      return;
+    }
+
+    const endOfToday = new Date();
+    endOfToday.setHours(23, 59, 59, 999);
+
+    if (picked > endOfToday) {
+      setErrorMessage('Không chọn ngày trong tương lai');
+      return;
+    }
+
     if (categoryId === null) {
       setErrorMessage('Chưa có danh mục, hãy thêm ở màn Danh mục');
       return;
@@ -78,13 +95,20 @@ export default function AddTransactionPage({ navigation }) {
 
     try {
       const money = parseInt(text, 10);
-      await addTransaction(type, money, categoryId, walletId, note.trim());
 
-      // Khoản chi: kiểm tra ngân sách của danh mục trong tháng này
+      // Chọn đúng ngày hôm nay thì lưu giờ hiện tại, ngày khác thì lưu 12 giờ trưa của ngày đó
+      const now = new Date();
+      const isToday = picked.toDateString() === now.toDateString();
+      const date = isToday ? now : picked;
+
+      await addTransaction(type, money, categoryId, walletId, note.trim(), date);
+
+      // Khoản chi: kiểm tra ngân sách của danh mục trong tháng của ngày đã chọn
       let warning = '';
 
       if (type === 'chi') {
-        const status = await getBudgetStatus(categoryId, getMonthKey(new Date()));
+        const monthKey = getMonthKey(date);
+        const status = await getBudgetStatus(categoryId, monthKey);
 
         if (status !== null) {
           const before = getPercent(status.spent - money, status.amount);
@@ -92,9 +116,11 @@ export default function AddTransactionPage({ navigation }) {
           const name = categories.find((c) => c.id === categoryId).name;
 
           if (after >= 100 && before < 100) {
-            warning = 'Danh mục "' + name + '" đã vượt ngân sách tháng này (' + after + '%).';
+            warning =
+              'Danh mục "' + name + '" đã vượt ngân sách tháng ' + formatMonth(monthKey) + ' (' + after + '%).';
           } else if (after >= 80 && before < 80) {
-            warning = 'Danh mục "' + name + '" đã dùng ' + after + '% ngân sách tháng này.';
+            warning =
+              'Danh mục "' + name + '" đã dùng ' + after + '% ngân sách tháng ' + formatMonth(monthKey) + '.';
           }
         }
       }
@@ -149,6 +175,15 @@ export default function AddTransactionPage({ navigation }) {
         onChangeText={setAmount}
         placeholder="Ví dụ: 50000"
         keyboardType="numeric"
+        style={styles.input}
+      />
+
+      <Text style={styles.label}>Ngày phát sinh (dd/mm/yyyy)</Text>
+      <TextInput
+        value={dateText}
+        onChangeText={setDateText}
+        placeholder="Ví dụ: 24/10/2026"
+        keyboardType="numbers-and-punctuation"
         style={styles.input}
       />
 

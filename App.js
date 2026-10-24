@@ -11,6 +11,7 @@ import AddTransactionPage from './Pages/AddTransactionPage';
 import CategoriesPage from './Pages/CategoriesPage';
 import WalletsPage from './Pages/WalletsPage';
 import BudgetsPage from './Pages/BudgetsPage';
+import StatsPage from './Pages/StatsPage';
 import { USER_KEY } from './utils';
 import { colors, fonts } from './theme';
 
@@ -88,6 +89,7 @@ export default function App() {
         <Stack.Screen name="Categories" component={CategoriesPage} options={{ title: 'Danh mục' }} />
         <Stack.Screen name="Wallets" component={WalletsPage} options={{ title: 'Ví / Tài khoản' }} />
         <Stack.Screen name="Budgets" component={BudgetsPage} options={{ title: 'Ngân sách' }} />
+        <Stack.Screen name="Stats" component={StatsPage} options={{ title: 'Thống kê' }} />
       </Stack.Navigator>
     </NavigationContainer>
   );
