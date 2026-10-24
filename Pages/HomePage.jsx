@@ -155,33 +155,44 @@ export default function HomePage({ navigation }) {
       </View>
 
       <View style={styles.actions}>
-        <Pressable
-          style={[styles.actionButton, styles.actionMain]}
-          onPress={() => navigation.navigate('AddTransaction')}
-        >
-          <Text style={styles.actionMainText}>+ GIAO DỊCH</Text>
-        </Pressable>
+        <View style={styles.actionsRow}>
+          <Pressable
+            style={[styles.actionButton, styles.actionMain]}
+            onPress={() => navigation.navigate('AddTransaction')}
+          >
+            <Text style={styles.actionMainText}>+ GIAO DỊCH</Text>
+          </Pressable>
 
-        <Pressable
-          style={styles.actionButton}
-          onPress={() => navigation.navigate('Categories')}
-        >
-          <Text style={styles.actionText}>Danh mục</Text>
-        </Pressable>
+          <Pressable
+            style={styles.actionButton}
+            onPress={() => navigation.navigate('Stats')}
+          >
+            <Text style={styles.actionText}>Thống kê</Text>
+          </Pressable>
+        </View>
 
-        <Pressable
-          style={styles.actionButton}
-          onPress={() => navigation.navigate('Wallets')}
-        >
-          <Text style={styles.actionText}>Ví</Text>
-        </Pressable>
+        <View style={styles.actionsRow}>
+          <Pressable
+            style={styles.actionButton}
+            onPress={() => navigation.navigate('Categories')}
+          >
+            <Text style={styles.actionText}>Danh mục</Text>
+          </Pressable>
 
-        <Pressable
-          style={styles.actionButton}
-          onPress={() => navigation.navigate('Budgets')}
-        >
-          <Text style={styles.actionText}>Ngân sách</Text>
-        </Pressable>
+          <Pressable
+            style={styles.actionButton}
+            onPress={() => navigation.navigate('Wallets')}
+          >
+            <Text style={styles.actionText}>Ví</Text>
+          </Pressable>
+
+          <Pressable
+            style={styles.actionButton}
+            onPress={() => navigation.navigate('Budgets')}
+          >
+            <Text style={styles.actionText}>Ngân sách</Text>
+          </Pressable>
+        </View>
       </View>
 
       {warnings.length > 0 && (
@@ -271,7 +282,8 @@ const styles = StyleSheet.create({
   thu: { color: colors.thu },
   chi: { color: colors.chi },
 
-  actions: { flexDirection: 'row', gap: 8, marginHorizontal: 12 },
+  actions: { gap: 8, marginHorizontal: 12 },
+  actionsRow: { flexDirection: 'row', gap: 8 },
   actionButton: {
     flex: 1,
     paddingVertical: 12,

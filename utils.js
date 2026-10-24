@@ -34,5 +34,24 @@ export function getPercent(spent, amount) {
   return Math.round((spent * 100) / amount);
 }
 
+// "dd/mm/yyyy" -> Date lúc 12 giờ trưa, nhập sai hoặc ngày không có thật thì trả về null
+export function parseInputDate(text) {
+  const match = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec(text.trim());
+
+  if (match === null) return null;
+
+  const day = parseInt(match[1], 10);
+  const month = parseInt(match[2], 10);
+  const year = parseInt(match[3], 10);
+  const date = new Date(year, month - 1, day, 12, 0, 0);
+
+  // Ví dụ 31/02 thì Date tự nhảy sang tháng sau, coi là không hợp lệ
+  if (date.getFullYear() !== year || date.getMonth() !== month - 1 || date.getDate() !== day) {
+    return null;
+  }
+
+  return date;
+}
+
 // Khóa AsyncStorage lưu tên người dùng đang đăng nhập
 export const USER_KEY = 'loggedInUser';

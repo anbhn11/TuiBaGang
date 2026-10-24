@@ -172,7 +172,7 @@ export async function deleteWallet(id) {
 
 // ===== GIAO DỊCH =====
 
-// Lấy toàn bộ giao dịch kèm tên danh mục và tên ví, mới nhất lên đầu
+// Lấy toàn bộ giao dịch kèm tên danh mục và tên ví, ngày mới nhất lên đầu
 export async function getAllTransactions() {
   const db = await getDb();
 
@@ -182,16 +182,17 @@ export async function getAllTransactions() {
      FROM transactions t
      LEFT JOIN categories c ON c.id = t.category_id
      LEFT JOIN wallets w ON w.id = t.wallet_id
-     ORDER BY t.id DESC`
+     ORDER BY t.created_at DESC, t.id DESC`
   );
 }
 
-export async function addTransaction(type, amount, categoryId, walletId, note) {
+// date là ngày phát sinh giao dịch (kiểu Date), không truyền thì lấy thời điểm hiện tại
+export async function addTransaction(type, amount, categoryId, walletId, note, date = new Date()) {
   const db = await getDb();
 
   await db.runAsync(
     'INSERT INTO transactions (type, amount, category_id, wallet_id, note, created_at) VALUES (?, ?, ?, ?, ?, ?)',
-    [type, amount, categoryId, walletId, note, new Date().toISOString()]
+    [type, amount, categoryId, walletId, note, date.toISOString()]
   );
 }
 
@@ -314,4 +315,46 @@ export async function registerUser(username, password) {
   const db = await getDb();
 
   await db.runAsync('INSERT INTO users (username, password) VALUES (?, ?)', [username, password]);
+}
+
+// ===== THỐNG KÊ THEO THÁNG =====
+
+// Tổng thu và tổng chi của một tháng
+export async function getMonthSummary(monthKey) {
+  const db = await getDb();
+  const range = getMonthRange(monthKey);
+
+  const rows = await db.getAllAsync(
+    `SELECT type, SUM(amount) AS total
+     FROM transactions
+     WHERE created_at >= ? AND created_at < ?
+     GROUP BY type`,
+    [range.start, range.end]
+  );
+
+  let thu = 0;
+  let chi = 0;
+
+  for (let i = 0; i < rows.length; i++) {
+    if (rows[i].type === 'thu') thu = rows[i].total;
+    if (rows[i].type === 'chi') chi = rows[i].total;
+  }
+
+  return { thu, chi };
+}
+
+// Tổng tiền theo từng danh mục trong tháng (type là 'thu' hoặc 'chi'), nhiều nhất lên đầu
+export async function getCategoryTotals(monthKey, type) {
+  const db = await getDb();
+  const range = getMonthRange(monthKey);
+
+  return await db.getAllAsync(
+    `SELECT c.name AS category_name, SUM(t.amount) AS total, COUNT(*) AS count
+     FROM transactions t
+     LEFT JOIN categories c ON c.id = t.category_id
+     WHERE t.type = ? AND t.created_at >= ? AND t.created_at < ?
+     GROUP BY t.category_id
+     ORDER BY total DESC`,
+    [type, range.start, range.end]
+  );
 }
