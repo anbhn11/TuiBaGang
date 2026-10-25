@@ -55,3 +55,12 @@ export function parseInputDate(text) {
 
 // Khóa AsyncStorage lưu tên người dùng đang đăng nhập
 export const USER_KEY = 'loggedInUser';
+
+// "Cà phê" -> "ca phe": bỏ dấu và chữ hoa để tìm kiếm không cần gõ đúng dấu
+export function removeAccents(text) {
+  return text
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/đ/g, 'd');
+}

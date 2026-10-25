@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Image, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { findUser } from '../db';
+import { findUser, setCurrentUser } from '../db';
 import { USER_KEY } from '../utils';
 import { colors, fonts } from '../theme';
 import PatternBorder from '../components/PatternBorder';
@@ -42,6 +42,7 @@ export default function LoginPage({ navigation, route }) {
 
       // Nhớ trạng thái đăng nhập để lần sau mở app vào thẳng Home
       await AsyncStorage.setItem(USER_KEY, user.username);
+      setCurrentUser(user.id);
       navigation.replace('Home');
     } catch (error) {
       setInfoMessage('');

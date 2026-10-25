@@ -12,21 +12,42 @@ import CategoriesPage from './Pages/CategoriesPage';
 import WalletsPage from './Pages/WalletsPage';
 import BudgetsPage from './Pages/BudgetsPage';
 import StatsPage from './Pages/StatsPage';
+import { findUser, setCurrentUser } from './db';
 import { USER_KEY } from './utils';
 import { colors, fonts } from './theme';
 
 const Stack = createNativeStackNavigator();
 
-// Tiêu đề màn Home: logo tròn + tên app
+// Tiêu đề màn Home: logo tròn + "Túi Ba Gang của <tên người dùng>"
 function HomeTitle() {
+  const [username, setUsername] = useState('');
+
+  // Lấy tên người đang đăng nhập đã lưu lúc đăng nhập
+  useEffect(() => {
+    const loadName = async () => {
+      try {
+        const name = await AsyncStorage.getItem(USER_KEY);
+        if (name !== null) setUsername(name);
+      } catch (error) {
+        // Không đọc được thì chỉ hiện tên app
+      }
+    };
+
+    loadName();
+  }, []);
+
   return (
-    <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+    <View style={{ flexDirection: 'row', alignItems: 'center', flexShrink: 1 }}>
       <Image
         source={require('./assets/logo.jpg')}
         style={{ width: 34, height: 34, borderRadius: 17, marginRight: 10 }}
       />
-      <Text style={{ color: colors.cream, fontFamily: fonts.heading, fontSize: 19, fontWeight: 'bold' }}>
+      <Text
+        numberOfLines={1}
+        style={{ color: colors.cream, fontFamily: fonts.heading, fontSize: 18, fontWeight: 'bold', flexShrink: 1 }}
+      >
         Túi Ba Gang
+        {username !== '' && <Text style={{ color: colors.gold }}> của {username}</Text>}
       </Text>
     </View>
   );
@@ -40,7 +61,21 @@ export default function App() {
     const checkLogin = async () => {
       try {
         const savedUser = await AsyncStorage.getItem(USER_KEY);
-        setInitialRoute(savedUser !== null ? 'Home' : 'Login');
+
+        if (savedUser !== null) {
+          // Tìm lại tài khoản đã đăng nhập để biết dữ liệu nào là của họ
+          const user = await findUser(savedUser);
+
+          if (user !== null) {
+            setCurrentUser(user.id);
+            setInitialRoute('Home');
+            return;
+          }
+
+          await AsyncStorage.removeItem(USER_KEY);
+        }
+
+        setInitialRoute('Login');
       } catch (error) {
         setInitialRoute('Login');
       }
@@ -93,4 +128,4 @@ export default function App() {
       </Stack.Navigator>
     </NavigationContainer>
   );
-}
+}

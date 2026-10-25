@@ -7,38 +7,65 @@ const DEFAULT_CHI = ['Ăn uống', 'Di chuyển', 'Mua sắm', 'Tiền nhà', 'H
 const DEFAULT_THU = ['Lương', 'Tiền thưởng', 'Khác'];
 const DEFAULT_WALLETS = ['Tiền mặt', 'Tài khoản ngân hàng', 'Ví điện tử'];
 
-async function seedDefaultData(db) {
+// Thêm danh mục và ví có sẵn cho một tài khoản
+async function seedDefaultData(db, userId) {
   for (let i = 0; i < DEFAULT_CHI.length; i++) {
-    await db.runAsync('INSERT INTO categories (name, type) VALUES (?, ?)', [DEFAULT_CHI[i], 'chi']);
+    await db.runAsync('INSERT INTO categories (name, type, user_id) VALUES (?, ?, ?)', [
+      DEFAULT_CHI[i],
+      'chi',
+      userId,
+    ]);
   }
 
   for (let i = 0; i < DEFAULT_THU.length; i++) {
-    await db.runAsync('INSERT INTO categories (name, type) VALUES (?, ?)', [DEFAULT_THU[i], 'thu']);
+    await db.runAsync('INSERT INTO categories (name, type, user_id) VALUES (?, ?, ?)', [
+      DEFAULT_THU[i],
+      'thu',
+      userId,
+    ]);
   }
 
   for (let i = 0; i < DEFAULT_WALLETS.length; i++) {
-    await db.runAsync('INSERT INTO wallets (name, initial_balance) VALUES (?, 0)', [DEFAULT_WALLETS[i]]);
+    await db.runAsync('INSERT INTO wallets (name, initial_balance, user_id) VALUES (?, 0, ?)', [
+      DEFAULT_WALLETS[i],
+      userId,
+    ]);
   }
 }
 
-// Mở database, tạo bảng nếu chưa có, chỉ thêm dữ liệu mẫu ở lần tạo đầu tiên
+// Các bảng dữ liệu riêng của từng tài khoản
+const USER_TABLES = ['categories', 'wallets', 'transactions', 'budgets'];
+
+// Database cũ chưa có cột user_id thì thêm vào, dữ liệu cũ giao cho tài khoản đăng ký đầu tiên
+async function addUserIdColumns(db) {
+  for (let i = 0; i < USER_TABLES.length; i++) {
+    const table = USER_TABLES[i];
+    const columns = await db.getAllAsync('PRAGMA table_info(' + table + ')');
+    const hasUserId = columns.some((c) => c.name === 'user_id');
+
+    if (!hasUserId) {
+      await db.execAsync('ALTER TABLE ' + table + ' ADD COLUMN user_id INTEGER');
+      await db.execAsync('UPDATE ' + table + ' SET user_id = (SELECT MIN(id) FROM users)');
+    }
+  }
+}
+
+// Mở database, tạo bảng nếu chưa có, nâng cấp database cũ nếu thiếu cột user_id
 async function openAndCreate() {
   const db = await SQLite.openDatabaseAsync('tuibagang.db');
-
-  const existed = await db.getFirstAsync(
-    "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'categories'"
-  );
 
   await db.execAsync(
     `CREATE TABLE IF NOT EXISTS categories (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       name TEXT NOT NULL,
-      type TEXT NOT NULL
+      type TEXT NOT NULL,
+      user_id INTEGER
     );
     CREATE TABLE IF NOT EXISTS wallets (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       name TEXT NOT NULL,
-      initial_balance INTEGER NOT NULL DEFAULT 0
+      initial_balance INTEGER NOT NULL DEFAULT 0,
+      user_id INTEGER
     );
     CREATE TABLE IF NOT EXISTS transactions (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -47,13 +74,15 @@ async function openAndCreate() {
       category_id INTEGER NOT NULL,
       wallet_id INTEGER NOT NULL,
       note TEXT,
-      created_at TEXT NOT NULL
+      created_at TEXT NOT NULL,
+      user_id INTEGER
     );
     CREATE TABLE IF NOT EXISTS budgets (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       category_id INTEGER NOT NULL,
       month TEXT NOT NULL,
-      amount INTEGER NOT NULL
+      amount INTEGER NOT NULL,
+      user_id INTEGER
     );
     CREATE TABLE IF NOT EXISTS users (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -62,11 +91,24 @@ async function openAndCreate() {
     );`
   );
 
-  if (existed === null) {
-    await seedDefaultData(db);
-  }
+  await addUserIdColumns(db);
 
   return db;
+}
+
+// Tài khoản đang đăng nhập, mọi câu truy vấn dữ liệu đều lọc theo id này
+let currentUserId = null;
+
+export function setCurrentUser(id) {
+  currentUserId = id;
+}
+
+function getUserId() {
+  if (currentUserId === null) {
+    throw new Error('Chưa đăng nhập');
+  }
+
+  return currentUserId;
 }
 
 // Chỉ mở database một lần, các lần sau dùng lại
@@ -86,13 +128,20 @@ export function getDb() {
 export async function getCategories() {
   const db = await getDb();
 
-  return await db.getAllAsync('SELECT * FROM categories ORDER BY type, id');
+  return await db.getAllAsync(
+    'SELECT * FROM categories WHERE user_id = ? ORDER BY type, id',
+    [getUserId()]
+  );
 }
 
 export async function addCategory(name, type) {
   const db = await getDb();
 
-  await db.runAsync('INSERT INTO categories (name, type) VALUES (?, ?)', [name, type]);
+  await db.runAsync('INSERT INTO categories (name, type, user_id) VALUES (?, ?, ?)', [
+    name,
+    type,
+    getUserId(),
+  ]);
 }
 
 export async function countTransactionsByCategory(id) {
@@ -119,7 +168,7 @@ export async function deleteCategory(id) {
 export async function getWallets() {
   const db = await getDb();
 
-  return await db.getAllAsync('SELECT * FROM wallets ORDER BY id');
+  return await db.getAllAsync('SELECT * FROM wallets WHERE user_id = ? ORDER BY id', [getUserId()]);
 }
 
 // Số dư của ví = số dư ban đầu + tổng thu - tổng chi
@@ -132,8 +181,10 @@ export async function getWalletsWithBalance() {
             COALESCE(SUM(CASE WHEN t.type = 'chi' THEN t.amount END), 0) AS total_chi
      FROM wallets w
      LEFT JOIN transactions t ON t.wallet_id = w.id
+     WHERE w.user_id = ?
      GROUP BY w.id
-     ORDER BY w.id`
+     ORDER BY w.id`,
+    [getUserId()]
   );
 
   return rows.map((row) => ({
@@ -147,9 +198,10 @@ export async function getWalletsWithBalance() {
 export async function addWallet(name, initialBalance) {
   const db = await getDb();
 
-  await db.runAsync('INSERT INTO wallets (name, initial_balance) VALUES (?, ?)', [
+  await db.runAsync('INSERT INTO wallets (name, initial_balance, user_id) VALUES (?, ?, ?)', [
     name,
     initialBalance,
+    getUserId(),
   ]);
 }
 
@@ -177,12 +229,14 @@ export async function getAllTransactions() {
   const db = await getDb();
 
   return await db.getAllAsync(
-    `SELECT t.id, t.type, t.amount, t.note, t.created_at,
+    `SELECT t.id, t.type, t.amount, t.note, t.created_at, t.category_id, t.wallet_id,
             c.name AS category_name, w.name AS wallet_name
      FROM transactions t
      LEFT JOIN categories c ON c.id = t.category_id
      LEFT JOIN wallets w ON w.id = t.wallet_id
-     ORDER BY t.created_at DESC, t.id DESC`
+     WHERE t.user_id = ?
+     ORDER BY t.created_at DESC, t.id DESC`,
+    [getUserId()]
   );
 }
 
@@ -191,8 +245,8 @@ export async function addTransaction(type, amount, categoryId, walletId, note, d
   const db = await getDb();
 
   await db.runAsync(
-    'INSERT INTO transactions (type, amount, category_id, wallet_id, note, created_at) VALUES (?, ?, ?, ?, ?, ?)',
-    [type, amount, categoryId, walletId, note, date.toISOString()]
+    'INSERT INTO transactions (type, amount, category_id, wallet_id, note, created_at, user_id) VALUES (?, ?, ?, ?, ?, ?, ?)',
+    [type, amount, categoryId, walletId, note, date.toISOString(), getUserId()]
   );
 }
 
@@ -207,11 +261,13 @@ export async function getSummary() {
   const db = await getDb();
 
   const rows = await db.getAllAsync(
-    'SELECT type, SUM(amount) AS total FROM transactions GROUP BY type'
+    'SELECT type, SUM(amount) AS total FROM transactions WHERE user_id = ? GROUP BY type',
+    [getUserId()]
   );
 
   const wallet = await db.getFirstAsync(
-    'SELECT COALESCE(SUM(initial_balance), 0) AS total FROM wallets'
+    'SELECT COALESCE(SUM(initial_balance), 0) AS total FROM wallets WHERE user_id = ?',
+    [getUserId()]
   );
 
   let thu = 0;
@@ -253,9 +309,9 @@ export async function getBudgetsWithSpent(monthKey) {
     `SELECT b.id, b.category_id, b.amount, c.name AS category_name, ${SPENT_SQL}
      FROM budgets b
      LEFT JOIN categories c ON c.id = b.category_id
-     WHERE b.month = ?
+     WHERE b.user_id = ? AND b.month = ?
      ORDER BY b.id`,
-    [range.start, range.end, monthKey]
+    [range.start, range.end, getUserId(), monthKey]
   );
 }
 
@@ -284,10 +340,11 @@ export async function saveBudget(categoryId, monthKey, amount) {
   );
 
   if (existed === null) {
-    await db.runAsync('INSERT INTO budgets (category_id, month, amount) VALUES (?, ?, ?)', [
+    await db.runAsync('INSERT INTO budgets (category_id, month, amount, user_id) VALUES (?, ?, ?, ?)', [
       categoryId,
       monthKey,
       amount,
+      getUserId(),
     ]);
   } else {
     await db.runAsync('UPDATE budgets SET amount = ? WHERE id = ?', [amount, existed.id]);
@@ -314,7 +371,26 @@ export async function findUser(username) {
 export async function registerUser(username, password) {
   const db = await getDb();
 
-  await db.runAsync('INSERT INTO users (username, password) VALUES (?, ?)', [username, password]);
+  const result = await db.runAsync('INSERT INTO users (username, password) VALUES (?, ?)', [
+    username,
+    password,
+  ]);
+  const userId = result.lastInsertRowId;
+
+  // Dữ liệu cũ chưa thuộc ai thì giao cho tài khoản này, nếu không có thì tạo danh mục và ví mẫu
+  const orphan = await db.getFirstAsync(
+    'SELECT COUNT(*) AS total FROM categories WHERE user_id IS NULL'
+  );
+
+  if (orphan.total > 0) {
+    for (let i = 0; i < USER_TABLES.length; i++) {
+      await db.runAsync('UPDATE ' + USER_TABLES[i] + ' SET user_id = ? WHERE user_id IS NULL', [
+        userId,
+      ]);
+    }
+  } else {
+    await seedDefaultData(db, userId);
+  }
 }
 
 // ===== THỐNG KÊ THEO THÁNG =====
@@ -327,9 +403,9 @@ export async function getMonthSummary(monthKey) {
   const rows = await db.getAllAsync(
     `SELECT type, SUM(amount) AS total
      FROM transactions
-     WHERE created_at >= ? AND created_at < ?
+     WHERE user_id = ? AND created_at >= ? AND created_at < ?
      GROUP BY type`,
-    [range.start, range.end]
+    [getUserId(), range.start, range.end]
   );
 
   let thu = 0;
@@ -352,9 +428,9 @@ export async function getCategoryTotals(monthKey, type) {
     `SELECT c.name AS category_name, SUM(t.amount) AS total, COUNT(*) AS count
      FROM transactions t
      LEFT JOIN categories c ON c.id = t.category_id
-     WHERE t.type = ? AND t.created_at >= ? AND t.created_at < ?
+     WHERE t.user_id = ? AND t.type = ? AND t.created_at >= ? AND t.created_at < ?
      GROUP BY t.category_id
      ORDER BY total DESC`,
-    [type, range.start, range.end]
+    [getUserId(), type, range.start, range.end]
   );
 }
