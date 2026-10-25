@@ -1,4 +1,5 @@
 import * as SQLite from 'expo-sqlite';
+import { deleteImage } from './Image';
 
 let dbPromise = null;
 
@@ -50,7 +51,17 @@ async function addUserIdColumns(db) {
   }
 }
 
-// Mở database, tạo bảng nếu chưa có, nâng cấp database cũ nếu thiếu cột user_id
+// Bảng giao dịch chưa có cột image_file (tên file ảnh hóa đơn) thì thêm vào, dữ liệu cũ giữ nguyên
+async function addImageColumn(db) {
+  const columns = await db.getAllAsync('PRAGMA table_info(transactions)');
+  const hasImage = columns.some((c) => c.name === 'image_file');
+
+  if (!hasImage) {
+    await db.execAsync('ALTER TABLE transactions ADD COLUMN image_file TEXT');
+  }
+}
+
+// Mở database, tạo bảng nếu chưa có, nâng cấp database cũ nếu thiếu cột
 async function openAndCreate() {
   const db = await SQLite.openDatabaseAsync('tuibagang.db');
 
@@ -92,6 +103,7 @@ async function openAndCreate() {
   );
 
   await addUserIdColumns(db);
+  await addImageColumn(db);
 
   return db;
 }
@@ -163,6 +175,38 @@ export async function deleteCategory(id) {
   await db.runAsync('DELETE FROM categories WHERE id = ?', [id]);
 }
 
+// Thêm lại danh mục mặc định còn thiếu cho tài khoản đang đăng nhập, mục đã có thì giữ nguyên
+export async function addMissingDefaultCategories() {
+  const db = await getDb();
+  const userId = getUserId();
+  const existing = await getCategories();
+  const groups = [
+    { type: 'chi', names: DEFAULT_CHI },
+    { type: 'thu', names: DEFAULT_THU },
+  ];
+  let added = 0;
+
+  for (let i = 0; i < groups.length; i++) {
+    for (let j = 0; j < groups[i].names.length; j++) {
+      const name = groups[i].names[j];
+      const found = existing.some(
+        (c) => c.type === groups[i].type && c.name.toLowerCase() === name.toLowerCase()
+      );
+
+      if (!found) {
+        await db.runAsync('INSERT INTO categories (name, type, user_id) VALUES (?, ?, ?)', [
+          name,
+          groups[i].type,
+          userId,
+        ]);
+        added++;
+      }
+    }
+  }
+
+  return added;
+}
+
 // ===== VÍ =====
 
 export async function getWallets() {
@@ -222,6 +266,29 @@ export async function deleteWallet(id) {
   await db.runAsync('DELETE FROM wallets WHERE id = ?', [id]);
 }
 
+// Thêm lại ví mặc định còn thiếu cho tài khoản đang đăng nhập
+export async function addMissingDefaultWallets() {
+  const db = await getDb();
+  const userId = getUserId();
+  const existing = await getWallets();
+  let added = 0;
+
+  for (let i = 0; i < DEFAULT_WALLETS.length; i++) {
+    const name = DEFAULT_WALLETS[i];
+    const found = existing.some((w) => w.name.toLowerCase() === name.toLowerCase());
+
+    if (!found) {
+      await db.runAsync('INSERT INTO wallets (name, initial_balance, user_id) VALUES (?, 0, ?)', [
+        name,
+        userId,
+      ]);
+      added++;
+    }
+  }
+
+  return added;
+}
+
 // ===== GIAO DỊCH =====
 
 // Lấy toàn bộ giao dịch kèm tên danh mục và tên ví, ngày mới nhất lên đầu
@@ -229,7 +296,7 @@ export async function getAllTransactions() {
   const db = await getDb();
 
   return await db.getAllAsync(
-    `SELECT t.id, t.type, t.amount, t.note, t.created_at, t.category_id, t.wallet_id,
+    `SELECT t.id, t.type, t.amount, t.note, t.created_at, t.category_id, t.wallet_id, t.image_file,
             c.name AS category_name, w.name AS wallet_name
      FROM transactions t
      LEFT JOIN categories c ON c.id = t.category_id
@@ -240,20 +307,79 @@ export async function getAllTransactions() {
   );
 }
 
-// date là ngày phát sinh giao dịch (kiểu Date), không truyền thì lấy thời điểm hiện tại
-export async function addTransaction(type, amount, categoryId, walletId, note, date = new Date()) {
+// Lấy một giao dịch theo id, kèm tên danh mục và tên ví, không có thì trả về null
+export async function getTransactionById(id) {
   const db = await getDb();
 
-  await db.runAsync(
-    'INSERT INTO transactions (type, amount, category_id, wallet_id, note, created_at, user_id) VALUES (?, ?, ?, ?, ?, ?, ?)',
-    [type, amount, categoryId, walletId, note, date.toISOString(), getUserId()]
+  return await db.getFirstAsync(
+    `SELECT t.id, t.type, t.amount, t.note, t.created_at, t.category_id, t.wallet_id, t.image_file,
+            c.name AS category_name, w.name AS wallet_name
+     FROM transactions t
+     LEFT JOIN categories c ON c.id = t.category_id
+     LEFT JOIN wallets w ON w.id = t.wallet_id
+     WHERE t.id = ? AND t.user_id = ?`,
+    [id, getUserId()]
   );
 }
 
+// date là ngày phát sinh giao dịch (kiểu Date), không truyền thì lấy thời điểm hiện tại
+// imageFile là tên file ảnh hóa đơn đã lưu trong thư mục của app, không có ảnh thì để null
+export async function addTransaction(
+  type,
+  amount,
+  categoryId,
+  walletId,
+  note,
+  date = new Date(),
+  imageFile = null
+) {
+  const db = await getDb();
+
+  await db.runAsync(
+    'INSERT INTO transactions (type, amount, category_id, wallet_id, note, created_at, image_file, user_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+    [type, amount, categoryId, walletId, note, date.toISOString(), imageFile, getUserId()]
+  );
+}
+
+// Sửa một giao dịch của tài khoản đang đăng nhập, đổi hoặc bỏ ảnh thì xóa file ảnh cũ
+export async function updateTransaction(
+  id,
+  type,
+  amount,
+  categoryId,
+  walletId,
+  note,
+  date,
+  imageFile = null
+) {
+  const db = await getDb();
+
+  const old = await db.getFirstAsync(
+    'SELECT image_file FROM transactions WHERE id = ? AND user_id = ?',
+    [id, getUserId()]
+  );
+
+  await db.runAsync(
+    'UPDATE transactions SET type = ?, amount = ?, category_id = ?, wallet_id = ?, note = ?, created_at = ?, image_file = ? WHERE id = ? AND user_id = ?',
+    [type, amount, categoryId, walletId, note, date.toISOString(), imageFile, id, getUserId()]
+  );
+
+  if (old !== null && old.image_file && old.image_file !== imageFile) {
+    deleteImage(old.image_file);
+  }
+}
+
+// Xóa giao dịch, nếu có ảnh hóa đơn thì xóa luôn file ảnh
 export async function deleteTransaction(id) {
   const db = await getDb();
 
+  const old = await db.getFirstAsync('SELECT image_file FROM transactions WHERE id = ?', [id]);
+
   await db.runAsync('DELETE FROM transactions WHERE id = ?', [id]);
+
+  if (old !== null && old.image_file) {
+    deleteImage(old.image_file);
+  }
 }
 
 // Tổng thu, tổng chi và tổng số dư ban đầu của các ví
@@ -432,29 +558,5 @@ export async function getCategoryTotals(monthKey, type) {
      GROUP BY t.category_id
      ORDER BY total DESC`,
     [getUserId(), type, range.start, range.end]
-  );
-}
-// Lấy một giao dịch theo id, kèm tên danh mục và tên ví, không có thì trả về null
-export async function getTransactionById(id) {
-  const db = await getDb();
-
-  return await db.getFirstAsync(
-    `SELECT t.id, t.type, t.amount, t.note, t.created_at, t.category_id, t.wallet_id,
-            c.name AS category_name, w.name AS wallet_name
-     FROM transactions t
-     LEFT JOIN categories c ON c.id = t.category_id
-     LEFT JOIN wallets w ON w.id = t.wallet_id
-     WHERE t.id = ? AND t.user_id = ?`,
-    [id, getUserId()]
-  );
-}
-
-// Sửa một giao dịch của tài khoản đang đăng nhập
-export async function updateTransaction(id, type, amount, categoryId, walletId, note, date) {
-  const db = await getDb();
-
-  await db.runAsync(
-    'UPDATE transactions SET type = ?, amount = ?, category_id = ?, wallet_id = ?, note = ?, created_at = ? WHERE id = ? AND user_id = ?',
-    [type, amount, categoryId, walletId, note, date.toISOString(), id, getUserId()]
   );
 }

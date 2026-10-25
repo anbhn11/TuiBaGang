@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import {
   Alert,
+  Image,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -17,6 +18,7 @@ import {
   updateTransaction,
 } from '../db';
 import { formatDate, formatMonth, getMonthKey, getPercent, parseInputDate } from '../utils';
+import { chooseFromLibrary, deleteImage, getImageUri, saveImage, takePhoto } from '../Image';
 
 import { colors, fonts } from '../theme';
 
@@ -29,6 +31,8 @@ export default function AddTransactionPage({ navigation, route }) {
   const [amount, setAmount] = useState('');
   const [note, setNote] = useState('');
   const [dateText, setDateText] = useState(formatDate(new Date().toISOString()));
+  const [imageFile, setImageFile] = useState(null); // tên file ảnh hóa đơn đã lưu của giao dịch
+  const [tempUri, setTempUri] = useState(null); // ảnh vừa chụp hoặc chọn, chưa lưu
 
   const [categories, setCategories] = useState([]);
   const [wallets, setWallets] = useState([]);
@@ -67,6 +71,7 @@ export default function AddTransactionPage({ navigation, route }) {
           setDateText(formatDate(tx.created_at));
           setCategoryId(tx.category_id);
           setWalletId(tx.wallet_id);
+          setImageFile(tx.image_file ?? null);
           return;
         }
 
@@ -87,6 +92,35 @@ export default function AddTransactionPage({ navigation, route }) {
 
     const first = categories.find((c) => c.type === newType);
     setCategoryId(first ? first.id : null);
+  };
+
+  // Chụp ảnh hóa đơn bằng camera
+  const handleTakePhoto = async () => {
+    try {
+      setErrorMessage('');
+
+      const uri = await takePhoto();
+      if (uri !== null) setTempUri(uri);
+    } catch (error) {
+      setErrorMessage(error.message);
+    }
+  };
+
+  // Chọn ảnh hóa đơn từ thư viện
+  const handlePickPhoto = async () => {
+    try {
+      setErrorMessage('');
+
+      const uri = await chooseFromLibrary();
+      if (uri !== null) setTempUri(uri);
+    } catch (error) {
+      setErrorMessage(error.message);
+    }
+  };
+
+  const handleRemovePhoto = () => {
+    setTempUri(null);
+    setImageFile(null);
   };
 
   const handleSave = async () => {
@@ -126,6 +160,8 @@ export default function AddTransactionPage({ navigation, route }) {
     if (saving) return;
     setSaving(true);
 
+    let newSavedName = null;
+
     try {
       const money = parseInt(text, 10);
 
@@ -155,10 +191,27 @@ export default function AddTransactionPage({ navigation, route }) {
         }
       }
 
+      // Có ảnh mới thì chép vào thư mục của app, không thì giữ ảnh cũ (hoặc không có ảnh)
+      let imageToSave = imageFile;
+
+      if (tempUri !== null) {
+        newSavedName = await saveImage(tempUri);
+        imageToSave = newSavedName;
+      }
+
       if (editingId !== null) {
-        await updateTransaction(editingId, type, money, categoryId, walletId, note.trim(), date);
+        await updateTransaction(
+          editingId,
+          type,
+          money,
+          categoryId,
+          walletId,
+          note.trim(),
+          date,
+          imageToSave
+        );
       } else {
-        await addTransaction(type, money, categoryId, walletId, note.trim(), date);
+        await addTransaction(type, money, categoryId, walletId, note.trim(), date, imageToSave);
       }
 
       // So với sau khi lưu để biết có vừa chạm mốc 80% hoặc 100% không
@@ -190,6 +243,8 @@ export default function AddTransactionPage({ navigation, route }) {
         navigation.goBack();
       }
     } catch (error) {
+      // Lưu giao dịch lỗi thì xóa file ảnh vừa chép để khỏi thừa
+      deleteImage(newSavedName);
       setErrorMessage('Không lưu được: ' + error.message);
     } finally {
       setSaving(false);
@@ -197,6 +252,11 @@ export default function AddTransactionPage({ navigation, route }) {
   };
 
   const shownCategories = categories.filter((c) => c.type === type);
+
+  // Ảnh đang hiển thị: ảnh mới chụp hoặc chọn, không có thì ảnh đã lưu của giao dịch
+  let previewUri = null;
+  if (tempUri !== null) previewUri = tempUri;
+  else if (imageFile) previewUri = getImageUri(imageFile);
 
   return (
     <ScrollView
@@ -289,6 +349,31 @@ export default function AddTransactionPage({ navigation, route }) {
         style={styles.input}
       />
 
+      <Text style={styles.label}>Ảnh hóa đơn</Text>
+      {previewUri ? (
+        <Image source={{ uri: previewUri }} style={styles.preview} />
+      ) : (
+        <View style={styles.previewEmpty}>
+          <Text style={styles.hint}>Chưa có ảnh</Text>
+        </View>
+      )}
+
+      <View style={styles.photoRow}>
+        <Pressable style={styles.photoButton} onPress={handleTakePhoto}>
+          <Text style={styles.photoText}>Chụp ảnh</Text>
+        </Pressable>
+
+        <Pressable style={styles.photoButton} onPress={handlePickPhoto}>
+          <Text style={styles.photoText}>Chọn từ thư viện</Text>
+        </Pressable>
+
+        {previewUri !== null && (
+          <Pressable style={[styles.photoButton, styles.photoRemove]} onPress={handleRemovePhoto}>
+            <Text style={[styles.photoText, styles.photoRemoveText]}>Xóa ảnh</Text>
+          </Pressable>
+        )}
+      </View>
+
       {errorMessage !== '' && <Text style={styles.error}>{errorMessage}</Text>}
 
       <Pressable style={styles.saveButton} onPress={handleSave} disabled={saving}>
@@ -340,6 +425,29 @@ const styles = StyleSheet.create({
   chipText: { color: colors.ink },
   chipTextActive: { color: colors.cream, fontWeight: 'bold' },
   hint: { color: colors.inkMute },
+
+  preview: { width: '100%', height: 200, borderRadius: 10, marginBottom: 10 },
+  previewEmpty: {
+    height: 120,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderStyle: 'dashed',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 10,
+  },
+  photoRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 20 },
+  photoButton: {
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: colors.primary,
+  },
+  photoText: { color: colors.primary, fontWeight: 'bold' },
+  photoRemove: { borderColor: colors.chi },
+  photoRemoveText: { color: colors.chi },
 
   error: { color: colors.chi, fontSize: 15, marginBottom: 12 },
 

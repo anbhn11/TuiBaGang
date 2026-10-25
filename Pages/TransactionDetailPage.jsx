@@ -1,8 +1,9 @@
 import { useCallback, useState } from 'react';
-import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Alert, Image, Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { deleteTransaction, getTransactionById } from '../db';
 import { formatDate, formatMoney } from '../utils';
+import { getImageUri } from '../Image';
 
 import { colors, fonts } from '../theme';
 
@@ -13,6 +14,7 @@ export default function TransactionDetailPage({ navigation, route }) {
   const [transaction, setTransaction] = useState(null);
   const [loading, setLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState('');
+  const [showImage, setShowImage] = useState(false);
 
   const loadTransaction = async () => {
     try {
@@ -109,6 +111,18 @@ export default function TransactionDetailPage({ navigation, route }) {
             {transaction.note ? transaction.note : 'Không có ghi chú'}
           </Text>
         </View>
+
+        {transaction.image_file ? (
+          <View style={styles.receiptBox}>
+            <Text style={styles.label}>Ảnh hóa đơn</Text>
+
+            <Pressable onPress={() => setShowImage(true)}>
+              <Image source={{ uri: getImageUri(transaction.image_file) }} style={styles.receipt} />
+            </Pressable>
+
+            <Text style={styles.receiptHint}>Bấm vào ảnh để xem lớn</Text>
+          </View>
+        ) : null}
       </View>
 
       <Pressable
@@ -121,6 +135,23 @@ export default function TransactionDetailPage({ navigation, route }) {
       <Pressable style={styles.deleteButton} onPress={confirmDelete}>
         <Text style={styles.deleteText}>XÓA GIAO DỊCH</Text>
       </Pressable>
+
+      <Modal
+        visible={showImage}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowImage(false)}
+      >
+        <Pressable style={styles.viewer} onPress={() => setShowImage(false)}>
+          {transaction.image_file ? (
+            <Image
+              source={{ uri: getImageUri(transaction.image_file) }}
+              style={styles.viewerImage}
+              resizeMode="contain"
+            />
+          ) : null}
+        </Pressable>
+      </Modal>
     </ScrollView>
   );
 }
@@ -167,6 +198,24 @@ const styles = StyleSheet.create({
   value: { fontSize: 15, color: colors.inkSoft, flexShrink: 1, textAlign: 'right' },
 
   noteBox: { paddingTop: 12, borderTopWidth: 1, borderTopColor: colors.track },
+
+  receiptBox: { paddingTop: 12, marginTop: 12, borderTopWidth: 1, borderTopColor: colors.track },
+  receipt: {
+    width: '100%',
+    height: 220,
+    borderRadius: 8,
+    marginTop: 8,
+    backgroundColor: colors.track,
+  },
+  receiptHint: { fontSize: 12, color: colors.inkMute, marginTop: 4 },
+
+  viewer: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.9)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  viewerImage: { width: '100%', height: '90%' },
   note: { fontSize: 15, color: colors.inkSoft, marginTop: 6 },
 
   editButton: {
