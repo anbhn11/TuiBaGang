@@ -8,12 +8,23 @@ import {
   TextInput,
   View,
 } from 'react-native';
-import { addTransaction, getBudgetStatus, getCategories, getWallets } from '../db';
+import {
+  addTransaction,
+  getBudgetStatus,
+  getCategories,
+  getTransactionById,
+  getWallets,
+  updateTransaction,
+} from '../db';
 import { formatDate, formatMonth, getMonthKey, getPercent, parseInputDate } from '../utils';
 
 import { colors, fonts } from '../theme';
 
-export default function AddTransactionPage({ navigation }) {
+export default function AddTransactionPage({ navigation, route }) {
+  // Có id truyền sang thì là chế độ sửa, không có thì là thêm mới
+  const editingId = route.params?.id ?? null;
+  const [original, setOriginal] = useState(null);
+
   const [type, setType] = useState('chi');
   const [amount, setAmount] = useState('');
   const [note, setNote] = useState('');
@@ -27,8 +38,12 @@ export default function AddTransactionPage({ navigation }) {
   const [errorMessage, setErrorMessage] = useState('');
   const [saving, setSaving] = useState(false);
 
-  // Mở màn hình: đọc danh mục và ví từ SQLite, chọn sẵn mục đầu tiên
+  // Mở màn hình: đọc danh mục và ví từ SQLite, chọn sẵn mục đầu tiên (hoặc đổ giao dịch cũ vào form)
   useEffect(() => {
+    if (editingId !== null) {
+      navigation.setOptions({ title: 'Sửa giao dịch' });
+    }
+
     const loadOptions = async () => {
       try {
         const categoryList = await getCategories();
@@ -36,6 +51,24 @@ export default function AddTransactionPage({ navigation }) {
 
         setCategories(categoryList);
         setWallets(walletList);
+
+        if (editingId !== null) {
+          const tx = await getTransactionById(editingId);
+
+          if (tx === null) {
+            setErrorMessage('Không tìm thấy giao dịch này');
+            return;
+          }
+
+          setOriginal(tx);
+          setType(tx.type);
+          setAmount(String(tx.amount));
+          setNote(tx.note ?? '');
+          setDateText(formatDate(tx.created_at));
+          setCategoryId(tx.category_id);
+          setWalletId(tx.wallet_id);
+          return;
+        }
 
         const firstCategory = categoryList.find((c) => c.type === 'chi');
         if (firstCategory) setCategoryId(firstCategory.id);
@@ -96,36 +129,59 @@ export default function AddTransactionPage({ navigation }) {
     try {
       const money = parseInt(text, 10);
 
-      // Chọn đúng ngày hôm nay thì lưu giờ hiện tại, ngày khác thì lưu 12 giờ trưa của ngày đó
+      // Sửa mà không đổi ngày thì giữ nguyên thời điểm cũ.
+      // Chọn ngày hôm nay thì lưu giờ hiện tại, ngày khác thì lưu 12 giờ trưa của ngày đó.
       const now = new Date();
-      const isToday = picked.toDateString() === now.toDateString();
-      const date = isToday ? now : picked;
+      let date;
 
-      await addTransaction(type, money, categoryId, walletId, note.trim(), date);
+      if (original !== null && dateText.trim() === formatDate(original.created_at)) {
+        date = new Date(original.created_at);
+      } else if (picked.toDateString() === now.toDateString()) {
+        date = now;
+      } else {
+        date = picked;
+      }
 
-      // Khoản chi: kiểm tra ngân sách của danh mục trong tháng của ngày đã chọn
+      const monthKey = getMonthKey(date);
+
+      // Khoản chi: ghi lại % ngân sách của danh mục trong tháng trước khi lưu
+      let beforePercent = 0;
+
+      if (type === 'chi') {
+        const statusBefore = await getBudgetStatus(categoryId, monthKey);
+
+        if (statusBefore !== null) {
+          beforePercent = getPercent(statusBefore.spent, statusBefore.amount);
+        }
+      }
+
+      if (editingId !== null) {
+        await updateTransaction(editingId, type, money, categoryId, walletId, note.trim(), date);
+      } else {
+        await addTransaction(type, money, categoryId, walletId, note.trim(), date);
+      }
+
+      // So với sau khi lưu để biết có vừa chạm mốc 80% hoặc 100% không
       let warning = '';
 
       if (type === 'chi') {
-        const monthKey = getMonthKey(date);
         const status = await getBudgetStatus(categoryId, monthKey);
 
         if (status !== null) {
-          const before = getPercent(status.spent - money, status.amount);
           const after = getPercent(status.spent, status.amount);
           const name = categories.find((c) => c.id === categoryId).name;
 
-          if (after >= 100 && before < 100) {
+          if (after >= 100 && beforePercent < 100) {
             warning =
               'Danh mục "' + name + '" đã vượt ngân sách tháng ' + formatMonth(monthKey) + ' (' + after + '%).';
-          } else if (after >= 80 && before < 80) {
+          } else if (after >= 80 && beforePercent < 80) {
             warning =
               'Danh mục "' + name + '" đã dùng ' + after + '% ngân sách tháng ' + formatMonth(monthKey) + '.';
           }
         }
       }
 
-      // Quay về Home, Home tự tải lại khi được mở lại
+      // Quay về màn trước (Home hoặc Chi tiết), màn đó tự tải lại khi được mở lại
       if (warning !== '') {
         Alert.alert('Cảnh báo ngân sách', warning, [
           { text: 'OK', onPress: () => navigation.goBack() },
@@ -236,7 +292,7 @@ export default function AddTransactionPage({ navigation }) {
       {errorMessage !== '' && <Text style={styles.error}>{errorMessage}</Text>}
 
       <Pressable style={styles.saveButton} onPress={handleSave} disabled={saving}>
-        <Text style={styles.saveText}>{saving ? 'ĐANG LƯU...' : 'LƯU GIAO DỊCH'}</Text>
+        <Text style={styles.saveText}>{saving ? 'ĐANG LƯU...' : editingId !== null ? 'LƯU THAY ĐỔI' : 'LƯU GIAO DỊCH'}</Text>
       </Pressable>
     </ScrollView>
   );

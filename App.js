@@ -12,9 +12,11 @@ import CategoriesPage from './Pages/CategoriesPage';
 import WalletsPage from './Pages/WalletsPage';
 import BudgetsPage from './Pages/BudgetsPage';
 import StatsPage from './Pages/StatsPage';
+import TransactionDetailPage from './Pages/TransactionDetailPage';
 import { findUser, setCurrentUser } from './db';
 import { USER_KEY } from './utils';
 import { colors, fonts } from './theme';
+
 
 const Stack = createNativeStackNavigator();
 
@@ -121,6 +123,11 @@ export default function App() {
           component={AddTransactionPage}
           options={{ title: 'Thêm giao dịch' }}
         />
+          <Stack.Screen
+            name="TransactionDetail"
+            component={TransactionDetailPage}
+            options={{ title: 'Chi tiết giao dịch' }}
+          />
         <Stack.Screen name="Categories" component={CategoriesPage} options={{ title: 'Danh mục' }} />
         <Stack.Screen name="Wallets" component={WalletsPage} options={{ title: 'Ví / Tài khoản' }} />
         <Stack.Screen name="Budgets" component={BudgetsPage} options={{ title: 'Ngân sách' }} />
@@ -128,4 +135,4 @@ export default function App() {
       </Stack.Navigator>
     </NavigationContainer>
   );
-}
+}

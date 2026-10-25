@@ -123,7 +123,10 @@ export default function HomePage({ navigation }) {
     const isThu = item.type === 'thu';
 
     return (
-      <View style={styles.card}>
+      <Pressable
+        style={styles.card}
+        onPress={() => navigation.navigate('TransactionDetail', { id: item.id })}
+      >
         <View style={styles.cardInfo}>
           <Text style={styles.category}>{item.category_name ?? 'Không rõ'}</Text>
 
@@ -144,7 +147,7 @@ export default function HomePage({ navigation }) {
             <Text style={styles.deleteText}>Xóa</Text>
           </Pressable>
         </View>
-      </View>
+      </Pressable>
     );
   };
 

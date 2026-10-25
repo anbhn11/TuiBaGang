@@ -434,3 +434,27 @@ export async function getCategoryTotals(monthKey, type) {
     [getUserId(), type, range.start, range.end]
   );
 }
+// Lấy một giao dịch theo id, kèm tên danh mục và tên ví, không có thì trả về null
+export async function getTransactionById(id) {
+  const db = await getDb();
+
+  return await db.getFirstAsync(
+    `SELECT t.id, t.type, t.amount, t.note, t.created_at, t.category_id, t.wallet_id,
+            c.name AS category_name, w.name AS wallet_name
+     FROM transactions t
+     LEFT JOIN categories c ON c.id = t.category_id
+     LEFT JOIN wallets w ON w.id = t.wallet_id
+     WHERE t.id = ? AND t.user_id = ?`,
+    [id, getUserId()]
+  );
+}
+
+// Sửa một giao dịch của tài khoản đang đăng nhập
+export async function updateTransaction(id, type, amount, categoryId, walletId, note, date) {
+  const db = await getDb();
+
+  await db.runAsync(
+    'UPDATE transactions SET type = ?, amount = ?, category_id = ?, wallet_id = ?, note = ?, created_at = ? WHERE id = ? AND user_id = ?',
+    [type, amount, categoryId, walletId, note, date.toISOString(), id, getUserId()]
+  );
+}
